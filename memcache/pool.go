@@ -80,7 +80,7 @@ func (p *Pool) reserveConnection() bool {
 	}
 }
 
-func (p *Pool) freeConnection() {
+func (p *Pool) releaseConnection() {
 	if p.maxOpenConnectionsCh == nil {
 		return
 	}
@@ -123,7 +123,7 @@ func (p *Pool) CloseConn(cn Conn) {
 	if p.config.CloseConnectionHook != nil {
 		p.config.CloseConnectionHook(p.addr, nil)
 	}
-	p.freeConnection()
+	p.releaseConnection()
 }
 
 func (p *Pool) newConn() (Conn, error) {
@@ -139,7 +139,7 @@ func (p *Pool) newConn() (Conn, error) {
 	}
 
 	if err != nil {
-		p.freeConnection()
+		p.releaseConnection()
 		return nil, err
 	}
 	cn.SetPool(p)

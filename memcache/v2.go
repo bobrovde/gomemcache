@@ -66,6 +66,29 @@ func (c *Client) GetV2(ctx context.Context, key string) (item *Item, err error) 
 	return
 }
 
+// Delete deletes the item with the provided key. The error ErrCacheMiss is
+// returned if the item didn't already exist in the cache.
+func (c *Client) DeleteV2(ctx context.Context, key string) error {
+	return c.withKeyAddr(key, func(addr net.Addr) error {
+		return c.withAddrRwWithCtx(ctx, addr, func(rw *bufio.ReadWriter) error {
+			return writeExpectf(rw, resultDeleted, "delete %s\r\n", key)
+		})
+	})
+}
+
+// GetMultiByAddr, caller have to be sure that all keys placed on one server
+// In method skipped keys validation
+func (c *Client) GetMultiByAddrV2(ctx context.Context, addr net.Addr, keys []string) (map[string]*Item, error) {
+	m := make(map[string]*Item)
+	addItemToMap := func(it *Item) {
+		m[it.Key] = it
+	}
+
+	err := c.getFromAddrWithCtx(ctx, addr, keys, addItemToMap)
+
+	return m, err
+}
+
 func (c *Client) GetMultiV2(ctx context.Context, keys []string) (map[string]*Item, error) {
 	var lk sync.Mutex
 	m := make(map[string]*Item)
@@ -101,6 +124,60 @@ func (c *Client) GetMultiV2(ctx context.Context, keys []string) (map[string]*Ite
 		}
 	}
 	return m, err
+}
+
+func (c *Client) DeleteMultiV2(ctx context.Context, keys []string) error {
+	keysMap := make(map[net.Addr][]string)
+
+	for _, key := range keys {
+		if !legalKey(key) {
+			return ErrMalformedKey
+		}
+
+		addr, err := c.selector.PickServer(key)
+		if err != nil {
+			return err
+		}
+
+		keysMap[addr] = append(keysMap[addr], key)
+	}
+
+	ch := make(chan error, buffered)
+	for addr, keys := range keysMap {
+		go func(addr net.Addr, keys []string) {
+			ch <- c.deleteManyWithContext(ctx, addr, keys)
+		}(addr, keys)
+	}
+
+	var responseErr error
+	for _ = range keysMap {
+		if ge := <-ch; ge != nil {
+			responseErr = ge
+		}
+	}
+
+	return responseErr
+}
+
+func (c *Client) deleteManyWithContext(ctx context.Context, addr net.Addr, keys []string) error {
+	return c.withAddrRwWithCtx(ctx, addr, func(rw *bufio.ReadWriter) error {
+		for _, key := range keys {
+			_, err := fmt.Fprintf(rw, "md %s q\r\n", key) // meta delete with "no reply"
+			if err != nil {
+				return err
+			}
+		}
+		_, err := rw.Write(mn)
+		if err != nil {
+			return err
+		}
+		err = rw.Flush()
+		if err != nil {
+			return err
+		}
+
+		return parseMetaCommandResponse(rw)
+	})
 }
 
 func (c *Client) SetMultiV2(ctx context.Context, items []*Item) error {
