@@ -47,8 +47,9 @@ type connV2 struct {
 	p    *Pool
 }
 
-func (c connV2) Close() error {
-	return c.nc.Close()
+func (c *connV2) Close() error {
+	c.p.CloseConn(c)
+	return nil
 }
 
 func (c connV2) Addr() net.Addr {
