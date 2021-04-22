@@ -147,6 +147,10 @@ type Client struct {
 
 	selector ServerSelector
 
+	config Config
+	muPool sync.RWMutex
+	pools  map[string]*Pool
+
 	lk       sync.Mutex
 	freeconn map[string][]*conn
 }
