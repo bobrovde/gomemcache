@@ -36,6 +36,7 @@ type Conn interface {
 	RW() *bufio.ReadWriter
 	SetTimeout(time.Duration)
 	SetPool(p *Pool)
+	PutConn()
 	Release()
 	Close() error
 }
@@ -48,12 +49,16 @@ type connV2 struct {
 }
 
 func (c *connV2) Close() error {
-	c.p.CloseConn(c)
-	return nil
+	return c.nc.Close()
 }
 
 func (c connV2) Addr() net.Addr {
 	return c.addr
+}
+
+//TODO Refactor this shit
+func (c *connV2) Release() {
+	c.p.CloseConn(c)
 }
 
 func (c *connV2) RW() *bufio.ReadWriter {
@@ -68,6 +73,6 @@ func (c *connV2) SetPool(p *Pool) {
 	c.p = p
 }
 
-func (c *connV2) Release() {
+func (c *connV2) PutConn() {
 	c.p.PutConn(c)
 }

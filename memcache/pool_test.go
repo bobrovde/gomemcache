@@ -289,6 +289,10 @@ func (m mockConn) SetPool(p *Pool) {
 	return
 }
 
+func (m mockConn) PutConn() {
+	return
+}
+
 func (m mockConn) Release() {
 	return
 }

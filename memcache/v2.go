@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -251,9 +252,11 @@ func (c *Client) withAddrRwWithCtx(ctx context.Context, addr net.Addr, fn func(*
 		err := fn(cn.RW())
 		errCh <- err
 		if err == nil || resumableError(err) {
-			cn.Release()
+			cn.PutConn()
 		} else {
-			cn.Close()
+			//TODO refactor this shit
+			log.Println(err)
+			cn.Release()
 		}
 	}()
 	select {
@@ -273,11 +276,12 @@ func (c *Client) getFromAddrWithCtx(ctx context.Context, addr net.Addr, keys []s
 			return err
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+		//TODO add write reset
+		//select {
+		//case <-ctx.Done():
+		//	return nil
+		//default:
+		//}
 
 		if err := rw.Flush(); err != nil {
 			return err
