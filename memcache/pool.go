@@ -114,14 +114,14 @@ func (p *Pool) PutConn(cn Conn) () {
 	select {
 	case p.connections <- cn:
 	default:
-		p.CloseConn(cn)
+		p.CloseConn(cn, CloseReasonIdleOverflow, nil)
 	}
 }
 
-func (p *Pool) CloseConn(cn Conn) {
+func (p *Pool) CloseConn(cn Conn, reason CloseReason, err error) {
 	cn.Close()
 	if p.config.CloseConnectionHook != nil {
-		p.config.CloseConnectionHook(p.addr, nil)
+		p.config.CloseConnectionHook(p.addr, reason, err)
 	}
 	p.releaseConnection()
 }
