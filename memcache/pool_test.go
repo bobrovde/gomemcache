@@ -209,15 +209,16 @@ func TestHooks(t *testing.T) {
 			}}, nil
 		}}
 		var closeConnectionHookCalled int
-		p.config.CloseConnectionHook = func(addr net.Addr, err error) {
+		p.config.CloseConnectionHook = func(addr net.Addr, reason CloseReason, err error) {
 			closeConnectionHookCalled++
 			assert.Equal(t, connAddr, addr.String())
-			assert.NoError(t, err)
+			assert.EqualValues(t, CloseReasonMemcachedError, reason)
+			assert.EqualError(t, err, "some error")
 		}
 
 		cn, err := p.GetConn(context.Background())
 		require.NoError(t, err)
-		p.CloseConn(cn)
+		p.CloseConn(cn, CloseReasonMemcachedError, errors.New("some error"))
 
 		assert.Equal(t, 1, closeConnectionHookCalled)
 	})
@@ -293,6 +294,10 @@ func (m mockConn) PutConn() {
 	return
 }
 
-func (m mockConn) Release() {
+func (m mockConn) Release(reason CloseReason, err error) {
 	return
+}
+
+func (m mockConn) NetConn() net.Conn {
+	return nil
 }

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"strings"
 	"sync"
@@ -71,7 +70,7 @@ func (c *Client) GetV2(ctx context.Context, key string) (item *Item, err error) 
 // returned if the item didn't already exist in the cache.
 func (c *Client) DeleteV2(ctx context.Context, key string) error {
 	return c.withKeyAddr(key, func(addr net.Addr) error {
-		return c.withAddrRwWithCtx(ctx, addr, func(rw *bufio.ReadWriter) error {
+		return c.withAddrRwWithCtx(ctx, addr, func(_ net.Conn, rw *bufio.ReadWriter) error {
 			return writeExpectf(rw, resultDeleted, "delete %s\r\n", key)
 		})
 	})
@@ -86,8 +85,11 @@ func (c *Client) GetMultiByAddrV2(ctx context.Context, addr net.Addr, keys []str
 	}
 
 	err := c.getFromAddrWithCtx(ctx, addr, keys, addItemToMap)
+	if err != nil {
+		return nil, err
+	}
 
-	return m, err
+	return m, nil
 }
 
 func (c *Client) GetMultiV2(ctx context.Context, keys []string) (map[string]*Item, error) {
@@ -161,7 +163,7 @@ func (c *Client) DeleteMultiV2(ctx context.Context, keys []string) error {
 }
 
 func (c *Client) deleteManyWithContext(ctx context.Context, addr net.Addr, keys []string) error {
-	return c.withAddrRwWithCtx(ctx, addr, func(rw *bufio.ReadWriter) error {
+	return c.withAddrRwWithCtx(ctx, addr, func(_ net.Conn, rw *bufio.ReadWriter) error {
 		for _, key := range keys {
 			_, err := fmt.Fprintf(rw, "md %s q\r\n", key) // meta delete with "no reply"
 			if err != nil {
@@ -212,7 +214,7 @@ func (c *Client) SetMultiV2(ctx context.Context, items []*Item) error {
 }
 
 func (c *Client) setManyWithCtx(ctx context.Context, addr net.Addr, items []*Item) error {
-	return c.withAddrRwWithCtx(ctx, addr, func(rw *bufio.ReadWriter) error {
+	return c.withAddrRwWithCtx(ctx, addr, func(_ net.Conn, rw *bufio.ReadWriter) error {
 		for _, item := range items {
 			_, err := fmt.Fprintf(rw, "ms %s T%d S%d F%d q\r\n", item.Key, item.Expiration, len(item.Value), item.Flags)
 			if err != nil {
@@ -240,7 +242,7 @@ func (c *Client) setManyWithCtx(ctx context.Context, addr net.Addr, items []*Ite
 	})
 }
 
-func (c *Client) withAddrRwWithCtx(ctx context.Context, addr net.Addr, fn func(*bufio.ReadWriter) error) (err error) {
+func (c *Client) withAddrRwWithCtx(ctx context.Context, addr net.Addr, fn func(net.Conn, *bufio.ReadWriter) error) (err error) {
 	cn, err := c.getConnWithContext(ctx, addr)
 	if err != nil {
 		return err
@@ -249,14 +251,12 @@ func (c *Client) withAddrRwWithCtx(ctx context.Context, addr net.Addr, fn func(*
 	go func() {
 		defer close(errCh)
 		cn.SetTimeout(time.Millisecond * 500)
-		err := fn(cn.RW())
+		err := fn(cn.NetConn(), cn.RW())
 		errCh <- err
 		if err == nil || resumableError(err) {
 			cn.PutConn()
 		} else {
-			//TODO refactor this shit
-			log.Println(err)
-			cn.Release()
+			cn.Release(CloseReasonMemcachedError, err)
 		}
 	}()
 	select {
@@ -271,22 +271,23 @@ func (c *Client) withAddrRwWithCtx(ctx context.Context, addr net.Addr, fn func(*
 }
 
 func (c *Client) getFromAddrWithCtx(ctx context.Context, addr net.Addr, keys []string, cb func(*Item)) error {
-	return c.withAddrRwWithCtx(ctx, addr, func(rw *bufio.ReadWriter) error {
+	return c.withAddrRwWithCtx(ctx, addr, func(nc net.Conn, rw *bufio.ReadWriter) error {
 		if _, err := fmt.Fprintf(rw, "gets %s\r\n", strings.Join(keys, " ")); err != nil {
 			return err
 		}
 
-		//TODO add write reset
-		//select {
-		//case <-ctx.Done():
-		//	return nil
-		//default:
-		//}
+		select {
+		case <-ctx.Done():
+			rw.Writer.Reset(nc)
+			return ctx.Err()
+		default:
+		}
 
 		if err := rw.Flush(); err != nil {
 			return err
 		}
 
+		//TODO move this to func parseGetResponse
 		select {
 		case <-ctx.Done():
 			return c.readUntilEnd(rw.Reader)

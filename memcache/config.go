@@ -20,6 +20,6 @@ type Config struct {
 
 	ConnectTimeout time.Duration
 
-	OpenConnectionHook  ConnectionHook
-	CloseConnectionHook ConnectionHook
+	OpenConnectionHook  OpenConnectionHook
+	CloseConnectionHook CloseConnectionHook
 }

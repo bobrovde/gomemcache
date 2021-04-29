@@ -6,7 +6,16 @@ import (
 	"time"
 )
 
-type ConnectionHook func(net.Addr, error)
+type CloseReason uint8
+
+const (
+	CloseReasonUnknown = iota
+	CloseReasonIdleOverflow
+	CloseReasonMemcachedError
+)
+
+type OpenConnectionHook func(net.Addr, error)
+type CloseConnectionHook func(net.Addr, CloseReason, error)
 
 type Dialer interface {
 	Dial(addr net.Addr, timeout time.Duration) (Conn, error)
@@ -34,10 +43,11 @@ func (d dialer) Dial(addr net.Addr, timeout time.Duration) (Conn, error) {
 type Conn interface {
 	Addr() net.Addr
 	RW() *bufio.ReadWriter
+	NetConn() net.Conn
 	SetTimeout(time.Duration)
 	SetPool(p *Pool)
 	PutConn()
-	Release()
+	Release(reason CloseReason, err error)
 	Close() error
 }
 
@@ -57,8 +67,8 @@ func (c connV2) Addr() net.Addr {
 }
 
 //TODO Refactor this shit
-func (c *connV2) Release() {
-	c.p.CloseConn(c)
+func (c *connV2) Release(reason CloseReason, err error) {
+	c.p.CloseConn(c, reason, err)
 }
 
 func (c *connV2) RW() *bufio.ReadWriter {
@@ -75,4 +85,8 @@ func (c *connV2) SetPool(p *Pool) {
 
 func (c *connV2) PutConn() {
 	c.p.PutConn(c)
+}
+
+func (c *connV2) NetConn() net.Conn {
+	return c.nc
 }
