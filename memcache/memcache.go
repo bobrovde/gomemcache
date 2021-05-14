@@ -82,6 +82,8 @@ func resumableError(err error) bool {
 	switch err {
 	case ErrCacheMiss, ErrCASConflict, ErrNotStored, ErrMalformedKey:
 		return true
+	case context.DeadlineExceeded, context.Canceled:
+		return true
 	}
 	return false
 }
